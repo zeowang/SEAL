@@ -74,6 +74,19 @@ namespace seal
         void decrypt(const Ciphertext &encrypted, Plaintext &destination);
 
         /*
+        Decrypts a Ciphertext and stores the result in the destination parameter.
+        Keep zero coefficients
+
+        @param[in] encrypted The ciphertext to decrypt
+        @param[out] destination The plaintext to overwrite with the decrypted
+        ciphertext
+        @throws std::invalid_argument if encrypted is not valid for the encryption
+        parameters
+        @throws std::invalid_argument if encrypted is not in the default NTT form
+        */
+        void decrypt_keep_zero_coeff(const Ciphertext &encrypted, Plaintext &destination);
+
+        /*
         Computes the invariant noise budget (in bits) of a ciphertext. The
         invariant noise budget measures the amount of room there is for the noise
         to grow while ensuring correct decryptions. This function works only with
@@ -101,6 +114,8 @@ namespace seal
 
     private:
         void bfv_decrypt(const Ciphertext &encrypted, Plaintext &destination, MemoryPoolHandle pool);
+
+        void bfv_decrypt_keep_zero_coeff(const Ciphertext &encrypted, Plaintext &destination, MemoryPoolHandle pool);
 
         void ckks_decrypt(const Ciphertext &encrypted, Plaintext &destination, MemoryPoolHandle pool);
 
