@@ -111,6 +111,33 @@ namespace seal
         }
     }
 
+    void Decryptor::decrypt_keep_zero_coeff(const Ciphertext &encrypted, Plaintext &destination)
+    {
+        // Verify that encrypted is valid.
+        if (!is_valid_for(encrypted, context_))
+        {
+            throw invalid_argument("encrypted is not valid for encryption parameters");
+        }
+
+        // Additionally check that ciphertext doesn't have trivial size
+        if (encrypted.size() < SEAL_CIPHERTEXT_SIZE_MIN)
+        {
+            throw invalid_argument("encrypted is empty");
+        }
+
+        auto &context_data = *context_.first_context_data();
+        auto &parms = context_data.parms();
+
+        switch (parms.scheme())
+        {
+        case scheme_type::bfv:
+            bfv_decrypt_keep_zero_coeff(encrypted, destination, pool_);
+            return;
+        default:
+            throw invalid_argument("unsupported scheme");
+        }
+    }
+
     void Decryptor::bfv_decrypt(const Ciphertext &encrypted, Plaintext &destination, MemoryPoolHandle pool)
     {
         if (encrypted.is_ntt_form())
@@ -149,6 +176,40 @@ namespace seal
 
         // Resize destination to appropriate size
         destination.resize(max(plain_coeff_count, size_t(1)));
+    }
+
+    void Decryptor::bfv_decrypt_keep_zero_coeff(const Ciphertext &encrypted, Plaintext &destination, MemoryPoolHandle pool)
+    {
+        if (encrypted.is_ntt_form())
+        {
+            throw invalid_argument("encrypted cannot be in NTT form");
+        }
+
+        auto &context_data = *context_.get_context_data(encrypted.parms_id());
+        auto &parms = context_data.parms();
+        auto &coeff_modulus = parms.coeff_modulus();
+        size_t coeff_count = parms.poly_modulus_degree();
+        size_t coeff_modulus_size = coeff_modulus.size();
+
+        // Firstly find c_0 + c_1 *s + ... + c_{count-1} * s^{count-1} mod q
+        // This is equal to Delta m + v where ||v|| < Delta/2.
+        // Add Delta / 2 and now we have something which is Delta * (m + epsilon) where epsilon < 1
+        // Therefore, we can (integer) divide by Delta and the answer will round down to m.
+
+        // Make a temp destination for all the arithmetic mod qi before calling FastBConverse
+        SEAL_ALLOCATE_ZERO_GET_RNS_ITER(tmp_dest_modq, coeff_count, coeff_modulus_size, pool);
+
+        // put < (c_1 , c_2, ... , c_{count-1}) , (s,s^2,...,s^{count-1}) > mod q in destination
+        // Now do the dot product of encrypted_copy and the secret key array using NTT.
+        // The secret key powers are already NTT transformed.
+        dot_product_ct_sk_array(encrypted, tmp_dest_modq, pool_);
+
+        // Allocate a full size destination to write to
+        destination.parms_id() = parms_id_zero;
+        destination.resize(coeff_count);
+        
+        // Divide scaling variant using BEHZ FullRNS techniques
+        context_data.rns_tool()->decrypt_scale_and_round(tmp_dest_modq, destination.data(), pool);
     }
 
     void Decryptor::ckks_decrypt(const Ciphertext &encrypted, Plaintext &destination, MemoryPoolHandle pool)
